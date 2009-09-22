@@ -33,6 +33,8 @@ import urllib
 import urllib2
 import urlparse
 
+import tornado.httpclient
+
 try:
   from hashlib import md5
 except ImportError:
@@ -1327,7 +1329,8 @@ class Api(object):
                          user=None,
                          count=None,
                          since=None, 
-                         since_id=None):
+                         since_id=None,
+                         async_callback=None):
     '''Fetch the sequence of twitter.Status messages for a user's friends
 
     The twitter.Api instance must be authenticated if the user is private.
@@ -1368,12 +1371,26 @@ class Api(object):
       parameters['since'] = since
     if since_id:
       parameters['since_id'] = since_id
-    json = self._FetchUrl(url, parameters=parameters)
-    data = simplejson.loads(json)
-    self._CheckForTwitterError(data)
-    return [Status.NewFromJsonDict(x) for x in data]
 
-  def GetUserTimeline(self, user=None, count=None, since=None, since_id=None):
+    def Callback(resp):
+      if isinstance(resp, tornado.httpclient.HTTPResponse):
+        if resp.error:
+          print resp.error
+          return async_callback([])          
+        resp = resp.body 
+      data = simplejson.loads(resp)
+      self._CheckForTwitterError(data)
+      return async_callback([Status.NewFromJsonDict(x) for x in data])
+
+    if async_callback == None:
+      resp = self._FetchUrl(url, parameters=parameters)
+      async_callback = lambda x: x
+      return Callback(resp)
+    else:
+      return self._FetchUrl(url, parameters=parameters,
+                            async_callback=Callback)
+
+  def GetUserTimeline(self, user=None, count=None, since=None, since_id=None, async_callback=None):
     '''Fetch the sequence of public twitter.Status messages for a single user.
 
     The twitter.Api instance must be authenticated if the user is private.
@@ -1411,10 +1428,24 @@ class Api(object):
       raise TwitterError("User must be specified if API is not authenticated.")
     else:
       url = 'http://twitter.com/statuses/user_timeline.json'
-    json = self._FetchUrl(url, parameters=parameters)
-    data = simplejson.loads(json)
-    self._CheckForTwitterError(data)
-    return [Status.NewFromJsonDict(x) for x in data]
+
+    def Callback(resp):
+      if isinstance(resp, tornado.httpclient.HTTPResponse):
+        if resp.error:
+          print resp.error
+          return async_callback([])          
+        resp = resp.body 
+      data = simplejson.loads(resp)
+      self._CheckForTwitterError(data)
+      return async_callback([Status.NewFromJsonDict(x) for x in data])
+
+    if async_callback == None:
+      resp = self._FetchUrl(url, parameters=parameters)
+      async_callback = lambda x: x
+      return Callback(resp)
+    else:
+      return self._FetchUrl(url, parameters=parameters,
+                            async_callback=Callback)
 
   def GetStatus(self, id):
     '''Returns a single status message.
@@ -1527,7 +1558,7 @@ class Api(object):
     results.append(self.PostUpdate(lines[-1], **kwargs))
     return results
 
-  def GetReplies(self, since=None, since_id=None, page=None): 
+  def GetReplies(self, since=None, since_id=None, page=None, async_callback=None):
     '''Get a sequence of status messages representing the 20 most recent
     replies (status updates prefixed with @username) to the authenticating
     user.
@@ -1554,10 +1585,24 @@ class Api(object):
       parameters['since_id'] = since_id
     if page:
       parameters['page'] = page
-    json = self._FetchUrl(url, parameters=parameters)
-    data = simplejson.loads(json)
-    self._CheckForTwitterError(data)
-    return [Status.NewFromJsonDict(x) for x in data]
+
+    def Callback(resp):
+      if isinstance(resp, tornado.httpclient.HTTPResponse):
+        if resp.error:
+          print resp.error
+          return async_callback([])          
+        resp = resp.body
+      data = simplejson.loads(resp)
+      self._CheckForTwitterError(data)
+      return async_callback([Status.NewFromJsonDict(x) for x in data])
+
+    if async_callback == None:
+      resp = self._FetchUrl(url, parameters=parameters)
+      async_callback = lambda x: x
+      return Callback(resp)
+    else:
+      return self._FetchUrl(url, parameters=parameters,
+                            async_callback=Callback)
 
   def GetFriends(self, user=None, page=None):
     '''Fetch the sequence of twitter.User instances, one for each friend.
@@ -1618,7 +1663,7 @@ class Api(object):
     self._CheckForTwitterError(data)
     return [User.NewFromJsonDict(x) for x in data]
 
-  def GetUser(self, user):
+  def GetUser(self, user, async_callback=None):
     '''Returns a single user.
 
     The twitter.Api instance must be authenticated.
@@ -1630,12 +1675,25 @@ class Api(object):
       A twitter.User instance representing that user
     '''
     url = 'http://twitter.com/users/show/%s.json' % user
-    json = self._FetchUrl(url)
-    data = simplejson.loads(json)
-    self._CheckForTwitterError(data)
-    return User.NewFromJsonDict(data)
 
-  def GetDirectMessages(self, since=None, since_id=None, page=None):
+    def Callback(resp):
+      if isinstance(resp, tornado.httpclient.HTTPResponse):
+        if resp.error:
+          print resp.error
+          return async_callback(None)
+        resp = resp.body 
+      data = simplejson.loads(resp)
+      self._CheckForTwitterError(data)
+      return async_callback(User.NewFromJsonDict(data))
+
+    if async_callback == None:
+      resp = self._FetchUrl(url)
+      async_callback = lambda x: x
+      return Callback(resp)
+    else:
+      return self._FetchUrl(url, async_callback=Callback)
+
+  def GetDirectMessages(self, since=None, since_id=None, page=None, async_callback=None):
     '''Returns a list of the direct messages sent to the authenticating user.
 
     The twitter.Api instance must be authenticated.
@@ -1661,10 +1719,23 @@ class Api(object):
       parameters['since_id'] = since_id
     if page:
       parameters['page'] = page 
-    json = self._FetchUrl(url, parameters=parameters)
-    data = simplejson.loads(json)
-    self._CheckForTwitterError(data)
-    return [DirectMessage.NewFromJsonDict(x) for x in data]
+    def Callback(resp):
+      if isinstance(resp, tornado.httpclient.HTTPResponse):
+        if resp.error:
+          print resp.error
+          return async_callback([])          
+        resp = resp.body
+      data = simplejson.loads(resp)
+      self._CheckForTwitterError(data)
+      return async_callback([DirectMessage.NewFromJsonDict(x) for x in data])
+
+    if async_callback == None:
+      resp = self._FetchUrl(url, parameters=parameters)
+      async_callback = lambda x: x
+      return Callback(resp)
+    else:
+      return self._FetchUrl(url, parameters=parameters,
+                            async_callback=Callback)
 
   def PostDirectMessage(self, user, text):
     '''Post a twitter direct message from the authenticated user
@@ -1983,7 +2054,8 @@ class Api(object):
                 url,
                 post_data=None,
                 parameters=None,
-                no_cache=None):
+                no_cache=None,
+                async_callback=None):
     '''Fetch a URL, optionally caching for a specified time.
 
     Args:
@@ -2008,10 +2080,19 @@ class Api(object):
     # Add key/value parameters to the query string of the url
     url = self._BuildUrl(url, extra_params=extra_params)
 
+    encoded_post_data = self._EncodePostData(post_data)
+
+    if async_callback == None:
+      return self._FetchUrlSync(url, encoded_post_data, no_cache)
+    else:
+      return self._FetchUrlAsync(url, encoded_post_data, no_cache, async_callback)
+
+  def _FetchUrlSync(self,
+                    url,
+                    encoded_post_data,
+                    no_cache):
     # Get a url opener that can handle basic auth
     opener = self._GetOpener(url, username=self._username, password=self._password)
-
-    encoded_post_data = self._EncodePostData(post_data)
 
     # Open and return the URL immediately if we're not going to cache
     if encoded_post_data or no_cache or not self._cache or not self._cache_timeout:
@@ -2038,6 +2119,22 @@ class Api(object):
     # Always return the latest version
     return url_data
 
+  def _FetchUrlAsync(self,
+                     url,
+                     encoded_post_data,
+                     no_cache,
+                     async_callback):
+    method = "GET"
+    if encoded_post_data != None:
+      method = "POST"
+
+    req = tornado.httpclient.HTTPRequest(
+      url=url, method=method, body=encoded_post_data,
+      auth_username=self._username,
+      auth_password=self._password)
+    http = tornado.httpclient.AsyncHTTPClient()
+    http.fetch(req, callback=async_callback)
+    return True
 
 class _FileCacheError(Exception):
   '''Base exception class for FileCache related errors'''
